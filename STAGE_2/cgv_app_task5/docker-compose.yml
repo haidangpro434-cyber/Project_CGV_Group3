@@ -1,0 +1,54 @@
+# Khởi chạy toàn bộ hệ thống chỉ bằng 1 lệnh:
+#   docker compose up --build        (hoặc: docker-compose up --build)
+# Mở trình duyệt: http://localhost:8501
+
+services:
+  # ---------- Container 1: Database (PostgreSQL) ----------
+  db:
+    image: postgres:16-alpine
+    container_name: cgv_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cgv}
+      POSTGRES_USER: ${POSTGRES_USER:-cgv_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cgv_pass}
+    volumes:
+      - pgdata:/var/lib/postgresql/data                              # dữ liệu bền vững
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro        # tạo bảng lần đầu
+    networks:
+      - cgv-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------- Container 2: Web App (Streamlit) ----------
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cgv_web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy        # chỉ chạy web khi database đã sẵn sàng
+    environment:
+      DB_HOST: db                         # gọi database bằng tên service trong network
+      DB_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-cgv}
+      POSTGRES_USER: ${POSTGRES_USER:-cgv_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cgv_pass}
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data:ro               # dữ liệu CSV (chỉ đọc)
+    networks:
+      - cgv-net
+
+volumes:
+  pgdata:
+
+networks:
+  cgv-net:
+    driver: bridge
